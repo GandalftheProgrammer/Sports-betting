@@ -31,7 +31,17 @@ LEAGUES = {
     "F1": "Ligue 1",
     "P1": "Primeira Liga",
     "N1": "Eredivisie",
+    # uitbreiding (campagne #3): tweede divisies + extra competities
+    "E1": "Championship",
+    "D2": "2. Bundesliga",
+    "SP2": "Segunda División",
+    "I2": "Serie B",
+    "F2": "Ligue 2",
+    "B1": "Jupiler Pro League",
+    "T1": "Süper Lig",
+    "SC0": "Scottish Premiership",
 }
+CORE_LEAGUES = ["E0", "SP1", "I1", "D1", "F1", "P1", "N1"]
 SEASONS = ["1617", "1718", "1819", "1920", "2021", "2122", "2223", "2324", "2425", "2526"]
 
 # Sommige bronbestanden gebruiken afwijkende teamnamen; we normaliseren naar
