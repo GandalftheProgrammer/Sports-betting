@@ -49,6 +49,43 @@ Zie [results/REPORT.md](../results/REPORT.md) voor alle cijfers. Samengevat:
    veel inzetten onder het minimum van €0,50. Kelly 25–50% met een plafond lijkt
    het beste compromis.
 
+## 2b. Bevindingen campagne #2 (eigen modellen, creatieve hypotheses)
+
+Literatuur die we hierbij gebruikten (selectie):
+- Constantinou & Fenton (2013), *pi-ratings*: dynamische ratings met aparte thuis- en uitrating; winst in 5 EPL-seizoenen ([paper](https://qmro.qmul.ac.uk/xmlui/bitstream/123456789/10776/5/CONSTANTINOU%20Determing%20the%20Level%20of%20Ability%202012%20Accepted.pdf))
+- Wheatcroft (2020/21): ratings op schoten en corners voorspellen beter dan doelpunten; +0,8% op O/U ([LSE](https://researchonline.lse.ac.uk/id/eprint/103712), [arXiv](https://arxiv.org/pdf/2001.09097))
+- Fischer & Haucap (2020/21) en Meier & Flepp (2021): de markt paste zich traag aan aan het verlies van thuisvoordeel bij ghost games ([CESifo](https://www.cesifo.org/en/publications/2020/working-paper/betting-market-efficiency-presence-unfamiliar-shocks-case-ghost), [arXiv](https://arxiv.org/pdf/2008.05417))
+- Forrest & Simmons (2008), Franck et al. (2011): sentiment-bias richting publieksclubs ([RWI](https://www.rwi-essen.de/en/publikationen/zitationsansicht/gemischt/detail/against-all-odds-national-sentiment-and-wagering-1510))
+- Winkelmann, Ötting, Deutscher & Makarewicz (2024): de meeste inefficiënties zijn kortstondig en verdwijnen weer ([J. Sports Econ.](https://journals.sagepub.com/doi/10.1177/15270025231204997))
+- Goddard & Asimakopoulos (2004): de betekenis van wedstrijden aan het einde van het seizoen telt mee in de prijzen ([summary](https://scholarhub.vn/publication/Forecasting-football-results-and-the-efficiency-of-fixed-odds-betting/d175c07c-f30c-4760-bd81-01034ff5d2fd))
+- Constantinou (2022), Hegarty & Whelan (2023/24): de Asian handicap-markt is efficiënter dan 1X2, maar niet perfect ([arXiv](https://arxiv.org/pdf/2003.09384), [Whelan](https://www.karlwhelan.com/?p=2370))
+- Lezana (2026): abnormale rendementen op gelijkspelen en uitploegen ([RePEc](https://econpapers.repec.org/RePEc:sae:jospec:v:27:y:2026:i:5:p:548-596))
+- Masterscriptie Lisbon (NOVA): is de Betfair-koers bij aftrap hoger of lager dan de eerdere koers? ([RUN](https://run.unl.pt/entities/publication/8b4eea4a-6ccd-4220-bc17-e79f66882daf))
+- Kaunitz et al. (2017) ([arXiv](https://arxiv.org/pdf/1710.02824))
+
+Wat we bouwden en vonden:
+1. **Modellen** (alle walk-forward): Dixon-Coles MLE met tijdsverval, op goals én op
+   een schoten-op-doel-proxy (xG-achtig), pi-ratings, Elo, en logistische regressie
+   en gradient boosting op ~90 features. De beste losse modellen verbeteren sterk
+   (logloss 0,991 → 0,978), maar als **uitslagvoorspeller** verslaan ze Pinnacle
+   (0,960) niet. Combinaties met de markt voegen hier niets toe.
+2. **De doorbraak: een andere vraag stellen.** Niet "wie wint?", maar "waar gaat de
+   Pinnacle-koers naartoe?". Dat voorspellen de modellen wel: correlatie 0,10–0,34
+   en 53–69% de goede richting, stabiel in TRAIN, VALID en TEST. Voorspelde slotkoers
+   = eerlijke kans → value betting werkt beter dan met de vroege Pinnacle-koers.
+3. **48 biases** getest met correctie voor meervoudig testen (Benjamini-Hochberg).
+   Geen enkele overleeft op TRAIN. Dat bevestigt Winkelmann et al. (2024): klassieke
+   biases zijn kortstondig. Te volgen signalen: gelijkspel tussen gelijkwaardige
+   teams, laat in het seizoen (HOLDOUT t=2,7), en het schotenmodel overschat
+   uitploegen (X2).
+4. **2e referentie:** de cascade Pinnacle → Betfair Exchange → consensus houdt
+   het systeem draaiend als Pinnacle-data ontbreekt. Dat geeft meer bets, maar
+   met een lagere kwaliteit per bet.
+5. **Asian handicap** (incl. kwartlijnen correct afgerekend): value werkt, met weinig bets.
+6. **Wedden vlak voor aftrap** tegen de Pinnacle-slotkoers: afgevallen (verlies in TEST).
+7. **Portfolio** (slotkoers-model 1X2 + AH + O/U) is de beste kandidaat voor fase 4
+   (paper trading). Zie [REPORT.md](../results/REPORT.md) §5–7.
+
 ## 3. Beperkingen van de backtest (waarom de echte resultaten lager uitvallen)
 
 - `max` is de beste koers over tientallen bookmakers, waaronder exchanges en

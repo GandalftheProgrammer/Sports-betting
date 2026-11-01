@@ -14,7 +14,7 @@ from dataclasses import dataclass, asdict
 import numpy as np
 import pandas as pd
 
-from .strategies import outcome_won
+from .strategies import unit_return
 
 
 @dataclass
@@ -46,7 +46,8 @@ def simulate(df: pd.DataFrame, bets: pd.DataFrame, bankroll: float = 100.0,
         return pd.DataFrame(columns=["date", "stake", "pnl", "bankroll"])
     b = bets.copy()
     b["date"] = df.loc[b.row, "date"].values
-    b["won"] = outcome_won(df, b)
+    b["ret"] = unit_return(df, b)
+    b["won"] = b.ret > 0
     b["frac"] = _raw_fraction(b, st)
     b = b.sort_values(["date", "row"]).reset_index(drop=True)
 
@@ -69,8 +70,7 @@ def simulate(df: pd.DataFrame, bets: pd.DataFrame, bankroll: float = 100.0,
         if s.sum() > bank:  # nooit meer inzetten dan je hebt
             s[:] = 0.0
         o = b.odds.values[idx]
-        w = b.won.values[idx]
-        pnl = np.where(w, s * (o - 1), -s)
+        pnl = s * b.ret.values[idx]
         bank += pnl.sum()
         stakes[idx], pnls[idx], banks[idx] = s, pnl, bank
     b["stake"], b["pnl"], b["bankroll"] = stakes, pnls, banks
@@ -80,7 +80,11 @@ def simulate(df: pd.DataFrame, bets: pd.DataFrame, bankroll: float = 100.0,
 def clv(df: pd.DataFrame, ledger: pd.DataFrame) -> np.ndarray:
     """Closing Line Value: genomen koers / eerlijke slotkoers (Pinnacle) - 1.
     Positieve CLV is de beste voorspeller van winst op lange termijn."""
-    fc = np.array([df.at[r, f"fairc_{s}"] for r, s in zip(ledger.row, ledger.sel)])
+    fc = np.array([df.at[r, f"refc_{s}"] if f"refc_{s}" in df else np.nan
+                   for r, s in zip(ledger.row, ledger.sel)])
+    if "line" in ledger:  # AH: alleen vergelijkbaar als de slotlijn gelijk is aan de genomen lijn
+        same = np.array([df.at[r, "ahc_line"] for r in ledger.row]) == ledger.line.values
+        fc = np.where(ledger.sel.isin(("ahh", "aha")).values & ~same, np.nan, fc)
     return ledger.odds.values * fc - 1
 
 
@@ -95,7 +99,7 @@ def metrics(df: pd.DataFrame, ledger: pd.DataFrame, bankroll: float = 100.0) -> 
     peak = np.maximum.accumulate(curve)
     dd = ((peak - curve) / peak).max()
     # vlakke-inzet rendement per bet (1 eenheid), onafhankelijk van staking
-    flat = np.where(ledger.won, ledger.odds - 1, -1.0)
+    flat = ledger.ret.values
     t = flat.mean() / (flat.std(ddof=1) / np.sqrt(len(flat))) if len(flat) > 1 else np.nan
     c = clv(df, ledger)
     return {

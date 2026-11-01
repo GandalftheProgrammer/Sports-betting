@@ -13,22 +13,35 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .features import SEL_1X2, SEL_OU
+from .features import SEL_1X2, SEL_AH, SEL_OU
 
-MARKETS = {"1x2": SEL_1X2, "ou": SEL_OU}
+MARKETS = {"1x2": SEL_1X2, "ou": SEL_OU, "ah": SEL_AH}
 
 
 def _stack(df: pd.DataFrame, book: str, prob_prefix: str, markets) -> pd.DataFrame:
     parts = []
+    closing = book.endswith("c")
     for mkt in markets:
         for s in MARKETS[mkt]:
-            parts.append(pd.DataFrame({
+            if f"{book}_{s}" not in df or f"{prob_prefix}_{s}" not in df:
+                continue
+            part = pd.DataFrame({
                 "row": df.index,
                 "market": mkt,
                 "sel": s,
                 "odds": df[f"{book}_{s}"].values,
                 "prob": df[f"{prob_prefix}_{s}"].values,
-            }))
+            })
+            if mkt == "ah":
+                part["line"] = df["ahc_line" if closing else "ah_line"].values
+                # kans en koers moeten over dezelfde lijn gaan
+                ref_close = prob_prefix.endswith("c")
+                if ref_close != closing:
+                    same = (df["ahc_line"] == df["ah_line"]).values
+                    part.loc[~same, "prob"] = np.nan
+            parts.append(part)
+    if not parts:
+        return pd.DataFrame(columns=["row", "market", "sel", "odds", "prob"])
     out = pd.concat(parts, ignore_index=True)
     return out.dropna(subset=["odds", "prob"])
 
@@ -47,14 +60,18 @@ class ValueVsSharp(Strategy):
     """Kern-strategie: wed bij een 'soft' bookmaker als die een hogere koers
     biedt dan de eerlijke koers volgens Pinnacle (scherpe markt).
 
-    params: book (b365|max|avg), min_edge, max_odds, min_odds, markets
+    params: book (b365|soft|max|avg, of met 'c' = slotkoers: b365c|maxc|avgc),
+            ref (kansbron: fair|ref|refc|mv|...), min_edge, max_edge, max_odds,
+            min_odds, markets (1x2|ou|ah), leagues
     """
     name: str = "value_vs_sharp"
 
     def bets(self, df):
-        p = {"book": "b365", "min_edge": 0.03, "max_odds": 5.0, "min_odds": 1.3,
-             "markets": ("1x2",), **self.params}
-        b = _stack(df, p["book"], "fair", p["markets"])
+        p = {"book": "b365", "ref": "fair", "min_edge": 0.03, "max_odds": 5.0, "min_odds": 1.3,
+             "markets": ("1x2",), "leagues": None, **self.params}
+        if p["leagues"]:
+            df = df[df.league.isin(p["leagues"])]
+        b = _stack(df, p["book"], p["ref"], p["markets"])
         b["edge"] = b.prob * b.odds - 1
         keep = (b.edge >= p["min_edge"]) & b.odds.between(p["min_odds"], p["max_odds"])
         if p.get("max_edge"):
@@ -93,7 +110,7 @@ class OddsBand(Strategy):
              "markets": ("1x2",), "leagues": None, **self.params}
         if p["leagues"]:
             df = df[df.league.isin(p["leagues"])]
-        b = _stack(df, p["book"], "fair", p["markets"])
+        b = _stack(df, p["book"], "ref", p["markets"])
         b["edge"] = b.prob * b.odds - 1
         keep = b.sel.isin(p["sels"]) & b.odds.between(p["min_odds"], p["max_odds"])
         return b[keep]
@@ -127,19 +144,73 @@ class Arbitrage(Strategy):
         return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 
+@dataclass
+class Portfolio(Strategy):
+    """Combinatie van value-bets over markten, elk met een eigen kansbron.
+    params: book, max_odds, legs = [(markt, ref, min_edge), ...]
+    Per wedstrijd en markt maximaal één bet (de grootste edge)."""
+    name: str = "portfolio"
+
+    def bets(self, df):
+        p = {"book": "max", "max_odds": 6.0, "min_odds": 1.3,
+             "legs": (("1x2", "avgmv", 0.01), ("ou", "ref", 0.02), ("ah", "ref", 0.02)),
+             **self.params}
+        parts = []
+        for mkt, ref, me in p["legs"]:
+            b = ValueVsSharp(params={"book": p["book"], "ref": ref, "min_edge": me,
+                                     "max_odds": p["max_odds"], "min_odds": p["min_odds"],
+                                     "markets": (mkt,)}).bets(df)
+            parts.append(b)
+        b = pd.concat([x for x in parts if len(x)], ignore_index=True)
+        if b.empty:
+            return b
+        b = b.sort_values("edge", ascending=False).drop_duplicates(["row", "market"])
+        return b.sort_values("row").reset_index(drop=True)
+
+
 def make(name: str, **params) -> Strategy:
     cls = {"value_vs_sharp": ValueVsSharp, "model_value": ModelValue,
-           "odds_band": OddsBand, "arbitrage": Arbitrage}[name]
+           "odds_band": OddsBand, "arbitrage": Arbitrage, "portfolio": Portfolio}[name]
     return cls(params=params)
 
 
-def outcome_won(df: pd.DataFrame, bets: pd.DataFrame) -> np.ndarray:
+def _ah_half(margin: np.ndarray, line: np.ndarray, odds: np.ndarray) -> np.ndarray:
+    """Rendement per eenheid voor een hele/halve AH-lijn."""
+    x = margin + line
+    return np.where(x > 0, odds - 1, np.where(x < 0, -1.0, 0.0))
+
+
+def ah_return(margin: np.ndarray, line: np.ndarray, odds: np.ndarray) -> np.ndarray:
+    """Asian handicap afrekening incl. kwartlijnen (-0.25 = half op 0, half op -0.5).
+    margin en line vanuit het perspectief van de geselecteerde ploeg."""
+    lo = np.floor(line * 2) / 2
+    hi = np.ceil(line * 2) / 2
+    return 0.5 * _ah_half(margin, lo, odds) + 0.5 * _ah_half(margin, hi, odds)
+
+
+def unit_return(df: pd.DataFrame, bets: pd.DataFrame) -> np.ndarray:
+    """Winst/verlies per ingezette eenheid (dus -1 bij verlies, odds-1 bij winst,
+    0 bij push, tussenwaarden bij kwart-AH-lijnen)."""
     r = df.loc[bets.row]
     goals = (r.fthg + r.ftag).values
     ftr = r.ftr.values
     sel = bets.sel.values
-    return np.select(
+    odds = bets.odds.values.astype(float)
+    won = np.select(
         [sel == "h", sel == "d", sel == "a", sel == "o", sel == "u"],
         [ftr == "H", ftr == "D", ftr == "A", goals > 2.5, goals < 2.5],
         False,
     )
+    ret = np.where(won, odds - 1, -1.0)
+    is_ah = np.isin(sel, ("ahh", "aha"))
+    if is_ah.any():
+        margin = (r.fthg - r.ftag).values.astype(float)
+        line = bets["line"].values.astype(float) if "line" in bets else np.full(len(bets), np.nan)
+        m_sel = np.where(sel == "ahh", margin, -margin)
+        l_sel = np.where(sel == "ahh", line, -line)
+        ret = np.where(is_ah, ah_return(m_sel, l_sel, odds), ret)
+    return ret
+
+
+def outcome_won(df: pd.DataFrame, bets: pd.DataFrame) -> np.ndarray:
+    return unit_return(df, bets) > 0

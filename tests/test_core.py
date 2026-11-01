@@ -55,3 +55,16 @@ def test_simulate_pnl_arithmetic():
     # bet 1 (row 1, thuis wint) +5, bet 2 (row 2, uit wint) -5
     assert list(led.pnl) == [5.0, -5.0]
     assert led.bankroll.iloc[-1] == 100.0
+
+
+def test_ah_settlement_quarter_lines():
+    from sbagent.strategies import ah_return
+    o = np.array([2.0])
+    # thuis -0.25, gelijkspel: half push, half verlies
+    assert ah_return(np.array([0.0]), np.array([-0.25]), o)[0] == -0.5
+    # thuis -0.75, winst met 1: half winst, half push
+    assert ah_return(np.array([1.0]), np.array([-0.75]), o)[0] == 0.5
+    # thuis -1, winst met 1: push
+    assert ah_return(np.array([1.0]), np.array([-1.0]), o)[0] == 0.0
+    # +0.5 gelijkspel: winst
+    assert ah_return(np.array([0.0]), np.array([0.5]), o)[0] == 1.0

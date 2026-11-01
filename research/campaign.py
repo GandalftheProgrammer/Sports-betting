@@ -25,8 +25,7 @@ def flat_eval(df, bets):
     """Rendement bij 1 eenheid op elke kandidaat (zonder bankroll-effecten)."""
     if len(bets) == 0:
         return dict(n=0, yield_=np.nan, t=np.nan)
-    won = S.outcome_won(df, bets)
-    r = np.where(won, bets.odds.values - 1, -1.0)
+    r = S.unit_return(df, bets)
     t = r.mean() / (r.std(ddof=1) / np.sqrt(len(r)))
     return dict(n=len(r), yield_=round(r.mean(), 4), t=round(t, 2))
 
@@ -58,7 +57,7 @@ def bias_tests(df):
 
 def per_season(df, ledger):
     s = df.loc[ledger.row, "season"].values
-    g = pd.DataFrame({"s": s, "r": np.where(ledger.won, ledger.odds - 1, -1.0)})
+    g = pd.DataFrame({"s": s, "r": ledger.ret.values})
     return g.groupby("s").r.agg(["count", "mean"]).round(3)
 
 

@@ -13,39 +13,38 @@ als een strategie dat aantoonbaar doorstaat, gaat er echt geld (€100) in.
 ```bash
 pip install -r requirements.txt
 python -m pytest -q                 # tests
-python -m research.campaign         # draait alle experimenten -> results/REPORT.md
-python -m research.campaign --test  # idem, plus het 'eindexamen' op 2025/26
+python -m research.models_eval     # modellen vs. markt (~3 min, eerste keer)
+python -m research.hypotheses      # 48 biases -> results/HYPOTHESES.md
+python -m research.campaign2       # strategieën + portfolio + €100-simulatie -> results/REPORT.md
 ```
 
 ## Hoe verdien je (misschien) geld met sportweddenschappen?
 
-Wat het onderzoek en onze eigen backtests laten zien (details in [docs/RESEARCH.md](docs/RESEARCH.md)):
+Twee onderzoekscampagnes: [campagne #1](results/REPORT_campagne1.md) en
+**[campagne #2 (actueel)](results/REPORT.md)**. Daarnaast
+[48 geteste biases](results/HYPOTHESES.md). De literatuur staat in [docs/RESEARCH.md](docs/RESEARCH.md).
 
-| Aanpak | Werkt het? | Bewijs in onze data (2016–2026, 7 competities, ~24.000 wedstrijden) |
+Data: 2016–2026, 7 competities, ~24.000 wedstrijden. Rendement = winst per ingezette euro bij vlakke inzet.
+
+| Aanpak | Oordeel | Bewijs (VALID 23/24–24/25 · TEST 25/26, nooit gezien bij het bouwen) |
 |---|---|---|
-| Blind wedden / "gevoel" | ❌ | −4,6% (Pinnacle) tot −7,1% (Bet365) per ingezette euro |
-| Favorieten wedden (bias) | ➖ | ±0% bij Pinnacle, −1,6% bij Bet365: geen winst |
-| Longshots/underdogs | ❌❌ | −16% tot −19%: hier zit de grootste marge van de bookmaker |
-| Eigen Poisson-model vs. markt | ❌ | Model (logloss 0,989) is slechter dan de markt (0,956); verliest op VALID |
-| **Value betting t.o.v. Pinnacle** | ✅ | +5 tot +8% op TRAIN **én** VALID, positieve Closing Line Value (+3–4%) |
-| Arbitrage (surebets) | ➖ | Bestaat, maar is zeldzaam (<1% marge) en neemt elk jaar sterk af |
+| Blind wedden / favorieten / underdogs | ❌ | −5% tot −19% |
+| 48 biases (publieksclubs, reeksen, geluk vs. schoten, promovendi, motivatie, rust, ghost games, …) | ❌ / 👀 | Na correctie voor meervoudig testen geen enkele structureel. Te volgen: gelijkspel tussen gelijkwaardige teams laat in het seizoen |
+| Eigen modellen (Dixon-Coles op goals/schoten, pi-ratings, Elo, ML) **als uitslagvoorspeller** | ➖ | Sterk verbeterd (logloss 0,991 → 0,978), maar nog niet beter dan de markt (0,960) |
+| **Eigen model als "slotkoers-voorspeller"** | ✅✅ | Voorspelt in 53–69% de richting van de Pinnacle-koersbeweging. Value betting op die voorspelde koers: positief in TRAIN, VALID én TEST |
+| Value t.o.v. Pinnacle (v1) | ✅ | +4,9% · +17% (max), CLV +2–3% |
+| Asian handicap value | ✅ | +6% · +30%, weinig bets |
+| Wedden vlak voor aftrap t.o.v. de Pinnacle-slotkoers | ❌ | −12% in TEST, afgevallen |
+| **Portfolio** (slotkoers-model 1X2 + AH + O/U) | ✅✅ | Beste marktkoers: +8,2% (t=1,95) · +5%, CLV +3,7–4,6%. Soft-mandje: +8,8% · +6,4% |
 
-**Kern-inzicht:** het is ongeveer kansloos om de *markt* te verslaan. Wel kun je
-**trage bookmakers** verslaan. Pinnacle is de scherpste bookmaker: zijn koers,
-zonder marge, is de beste schatting van de echte kans. Biedt een andere
-bookmaker op hetzelfde moment een hogere koers, dan heb je een verwachte
-winst. Hoe meer bookmakers je kunt vergelijken (line shopping), hoe meer
-kansen.
+**Met €100 (vlakke inzet 2%, inzetplafonds):** VALID €100 → €136 (soft) / €275 (beste
+marktkoers). TEST €100 → €120 (soft) / €116 (max).
 
-**De grote valkuilen (eerlijk):**
-1. Met **alleen Bet365** is er te weinig edge: ±30 bets per seizoen, niet significant.
-   De edge zit in het vergelijken van veel bookmakers.
-2. **Bookmakers beperken winnaars.** Een value-bettor krijgt na een paar
-   weken tot maanden limieten. Daarom simuleert de backtester inzetlimieten.
-3. De kansen worden kleiner: het aantal surebets en value-bets daalt per seizoen.
-4. In 2025/26 ontbreken voor de helft van de wedstrijden Pinnacle-koersen in
-   de data, omdat Pinnacle de toegang tot zijn data heeft beperkt. Een tweede
-   scherpe referentie (Betfair Exchange) is daarom een prioriteit.
+**Eerlijke verwachting:** de CLV (1–4%) is een betrouwbaardere schatting van de
+echte edge dan het rendement (6–9%), want rendement bevat veel geluk. Reken
+dus op **+1 tot +4% per ingezette euro**. Dat is een echte edge, maar het potje
+groeit geleidelijk. Bookmakerlimieten zijn nog steeds het grootste
+praktische risico.
 
 ## Architectuur
 
@@ -53,13 +52,21 @@ kansen.
 sbagent/
   data.py         historische CSV's laden + normaliseren (teamnamen, koersbronnen)
   devig.py        marge uit koersen halen (multiplicatief, power, Shin)
-  model.py        eigen online Poisson-model (aanval/verdediging), strikt zonder look-ahead
-  features.py     eerlijke kansen + modelkansen per wedstrijd
-  strategies.py   ValueVsSharp, ModelValue, OddsBand (bias-tests), Arbitrage
+  model.py        eenvoudig online Poisson-model (v1)
+  ratings.py      Dixon-Coles MLE (goals en schoten-op-doel), pi-ratings, Elo
+  teamfeat.py     pre-match teamfeatures: vorm, reeksen, schoten, 'geluk', stand, motivatie, rust, promovendi
+  ml.py           walk-forward ML (logistische regressie, gradient boosting) op markt + modellen + team
+  movement.py     'voorspel de slotkoers'-model (ridge + gradient boosting)
+  features.py     eerlijke kansen per bron (Pinnacle / Betfair / consensus, open + slot) + alle modellen
+  strategies.py   ValueVsSharp (elke kansbron × elke bookmaker × 1X2/OU/AH), Portfolio, OddsBand, Arbitrage
   backtest.py     bankroll-simulatie per speeldag: Kelly/flat, limieten, CLV, drawdown
   experiments.py  leer-lus: zoeken op TRAIN -> toetsen op VALID -> eindexamen TEST, alles gelogd
 research/
-  campaign.py     onderzoekscampagne die het rapport genereert
+  campaign.py     campagne #1
+  models_eval.py  modelvergelijking (logloss/RPS) vs. markt
+  movement_eval.py  evaluatie slotkoers-voorspeller
+  hypotheses.py   48 bias-hypotheses met Benjamini-Hochberg correctie
+  campaign2.py    campagne #2 -> results/REPORT.md
 results/
   REPORT.md            laatste rapport
   experiments.jsonl    logboek van álle experimenten (wat werkte, wat niet)
@@ -80,7 +87,8 @@ data/raw/<seizoen>/<competitie>.csv   football-data.co.uk formaat
 |---|---|---|
 | 1 | Onderzoek + historische data (7 competities, 10 seizoenen) | ✅ |
 | 2 | Backtester + strategieën + leer-lus met train/valid/test | ✅ (campagne #1) |
-| 3 | Verbeteren: Betfair als 2e scherpe referentie, timing (koers vlak voor aftrap), extra markten (Asian handicap), limieten realistischer, combinaties | ⏳ volgende |
+| 3 | Verbeteren: sterkere modellen, slotkoers-voorspeller, 2e referentie, AH, slotkoers-wedden, 48 biases, portfolio | ✅ (campagne #2) |
+| 3b | Verder: slotkoers-voorspeller verfijnen (meer features: blessures/opstellingen, nieuws-timing), per-competitie-modellen, gelijkspelsignaal volgen | ⏳ |
 | 4 | Live koersen ophalen (The Odds API) + **paper trading**: dezelfde beslissingen live, zonder geld, CLV meten | ⏳ |
 | 5 | Dashboard (bankroll, CLV, bets, wat werkt) | ⏳ |
 | 6 | Echt geld (€100), strikte risicoregels, automatische uitvoering waar dat mag | ⏳ alleen na bewezen CLV in fase 4 |

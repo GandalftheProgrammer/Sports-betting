@@ -27,6 +27,8 @@ from .data import ROOT
 
 SPLITS = {
     "train": ["1617", "1718", "1819", "1920", "2021", "2122", "2223"],
+    # modellen die eerst 2 seizoenen historie nodig hebben, starten in 2018/19
+    "train18": ["1819", "1920", "2021", "2122", "2223"],
     "valid": ["2324", "2425"],
     "test": ["2526"],
     "all": ["1617", "1718", "1819", "1920", "2021", "2122", "2223", "2324", "2425", "2526"],
@@ -46,7 +48,7 @@ def p_positive(ledger: pd.DataFrame, n_boot: int = 2000, seed: int = 0) -> float
     """Bootstrap-kans dat het echte (vlakke) rendement > 0 is."""
     if len(ledger) < 20:
         return float("nan")
-    r = np.where(ledger.won, ledger.odds - 1, -1.0)
+    r = ledger.ret.values
     rng = np.random.default_rng(seed)
     means = rng.choice(r, size=(n_boot, len(r)), replace=True).mean(axis=1)
     return float((means > 0).mean())
@@ -81,12 +83,13 @@ def grid(space: dict):
 
 
 def search(df: pd.DataFrame, strategy: str, space: dict, staking: Staking | None = None,
-           min_bets: int = 150, top_k: int = 3, tag: str = "search") -> pd.DataFrame:
+           min_bets: int = 150, top_k: int = 3, tag: str = "search",
+           train_split: str = "train") -> pd.DataFrame:
     """Zoek op TRAIN, toets top_k op VALID. Selectie op t-stat (robuuster dan winst)."""
     staking = staking or Staking(method="flat", pct=0.01, max_day_frac=1.0)
     rows = []
     for params in grid(space):
-        r = run(df, strategy, params, staking, "train", tag=tag)
+        r = run(df, strategy, params, staking, train_split, tag=tag)
         m = r["metrics"]
         if m["n_bets"] >= min_bets:
             rows.append({"params": params, **{f"tr_{k}": v for k, v in m.items()}})
